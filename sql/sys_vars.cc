@@ -1515,6 +1515,15 @@ static Sys_var_ulong Sys_max_connect_errors(
        VALID_RANGE(1, UINT_MAX), DEFAULT(MAX_CONNECT_ERRORS),
        BLOCK_SIZE(1));
 
+static Sys_var_uint Sys_max_password_errors(
+       "max_password_errors",
+       "If there is more than this number of failed connect attempts "
+       "due to invalid password, user will be blocked from further connections until FLUSH_PRIVILEGES."
+       "Value 0 disables user blocking",
+       GLOBAL_VAR(max_password_errors), CMD_LINE(REQUIRED_ARG),
+       VALID_RANGE(0, UINT_MAX), DEFAULT(0),
+       BLOCK_SIZE(1));
+
 static Sys_var_uint Sys_max_digest_length(
        "max_digest_length", "Maximum length considered for digest text.",
        READ_ONLY GLOBAL_VAR(max_digest_length),
