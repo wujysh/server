@@ -12999,6 +12999,7 @@ enum PASSWD_ERROR_ACTION
 /* Increment, or clear password errors for a user. */
 static void handle_password_errors(const char *user, const char *hostname, PASSWD_ERROR_ACTION action)
 {
+#ifndef NO_EMBEDDED_ACCESS_CHECKS
   safe_mutex_assert_not_owner(&acl_cache->lock);
   mysql_mutex_lock(&acl_cache->lock);
   ACL_USER *u = find_user_exact(hostname, user);
@@ -13018,6 +13019,7 @@ static void handle_password_errors(const char *user, const char *hostname, PASSW
     }
   }
   mysql_mutex_unlock(&acl_cache->lock);
+#endif
 }
 
 
