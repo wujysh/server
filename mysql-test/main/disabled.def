@@ -25,4 +25,4 @@ mysqlcheck               : special tables like proxy , host specific to a system
 flush_read_lock          : special tables like proxy , host specific to a system are shown
 partition_explicit_prune : enable after MDEV-17032 is fixed
 column_compression_parts : enable after MDEV-17032 is fixed
-join_cache_level         : enable after MDEV-17752 is fixed
+join_cache               : enable after MDEV-17752 is fixed
