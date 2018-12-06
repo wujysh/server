@@ -2631,7 +2631,7 @@ fil_space_verify_crypt_checksum(
 		checksum2 = mach_read_from_4(
 			page + UNIV_PAGE_SIZE - FIL_PAGE_END_LSN_OLD_CHKSUM);
 		valid = buf_page_is_checksum_valid_crc32(
-			page, checksum1, checksum2, false
+			page, checksum1, checksum2
 			/* FIXME: also try the original crc32 that was
 			buggy on big-endian architectures? */)
 			|| buf_page_is_checksum_valid_innodb(
@@ -2660,8 +2660,7 @@ fil_space_verify_crypt_checksum(
 		ib::info()
 			<< "If unencrypted: stored checksum [" << checksum1
 			<< ":" << checksum2 << "] calculated crc32 ["
-			<< buf_calc_page_crc32(page, false) << ":"
-			<< buf_calc_page_crc32(page, true) << "] innodb ["
+			<< buf_calc_page_crc32(page) << "] innodb ["
 			<< buf_calc_page_old_checksum(page) << ":"
 			<< buf_calc_page_new_checksum(page) << "] LSN "
 			<< mach_read_from_4(page + FIL_PAGE_LSN);

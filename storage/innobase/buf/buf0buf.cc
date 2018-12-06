@@ -762,11 +762,9 @@ bool
 buf_page_is_checksum_valid_crc32(
 	const byte*			read_buf,
 	ulint				checksum_field1,
-	ulint				checksum_field2,
-	bool				use_legacy_big_endian)
+	ulint				checksum_field2)
 {
-	const uint32_t	crc32 = buf_calc_page_crc32(read_buf,
-						    use_legacy_big_endian);
+	const uint32_t	crc32 = buf_calc_page_crc32(read_buf);
 
 #ifdef UNIV_INNOCHECKSUM
 	if (log_file
@@ -785,12 +783,6 @@ buf_page_is_checksum_valid_crc32(
 
 	if (checksum_field1 == crc32) {
 		return(true);
-	} else {
-		const uint32_t	crc32_legacy = buf_calc_page_crc32(read_buf, true);
-
-		if (checksum_field1 == crc32_legacy) {
-			return(true);
-		}
 	}
 
 invalid:
@@ -946,6 +938,9 @@ buf_page_is_corrupted(
 {
 	size_t checksum_field1 = 0;
 	size_t checksum_field2 = 0;
+	bool crc32_inited = false;
+	ib_uint32_t crc32 = ULINT32_UNDEFINED;
+
 #ifndef UNIV_INNOCHECKSUM
 	DBUG_EXECUTE_IF("buf_page_import_corrupt_failure", return(true); );
 #endif
@@ -1089,212 +1084,118 @@ buf_page_is_corrupted(
 	const srv_checksum_algorithm_t	curr_algo =
 		static_cast<srv_checksum_algorithm_t>(srv_checksum_algorithm);
 
-	bool	legacy_checksum_checked = false;
-
 	switch (curr_algo) {
-	case SRV_CHECKSUM_ALGORITHM_CRC32:
 	case SRV_CHECKSUM_ALGORITHM_STRICT_CRC32:
 
 		if (buf_page_is_checksum_valid_crc32(read_buf,
-			checksum_field1, checksum_field2, false)) {
-			return(false);
-		}
-
-		if (buf_page_is_checksum_valid_none(read_buf,
 			checksum_field1, checksum_field2)) {
-			if (curr_algo
-			    == SRV_CHECKSUM_ALGORITHM_STRICT_CRC32) {
-#ifndef UNIV_INNOCHECKSUM
-				page_warn_strict_checksum(
-					curr_algo,
-					SRV_CHECKSUM_ALGORITHM_NONE,
-					page_id);
-#endif /* !UNIV_INNOCHECKSUM */
-			}
-
-#ifdef UNIV_INNOCHECKSUM
-			if (log_file) {
-				fprintf(log_file, "page::%llu;"
-					" old style: calculated = %u;"
-					" recorded = " ULINTPF ";\n",
-					cur_page_num,
-					buf_calc_page_old_checksum(read_buf),
-					checksum_field2);
-				fprintf(log_file, "page::%llu;"
-					" new style: calculated = %u;"
-					" crc32 = %u; recorded = " ULINTPF ";\n",
-					cur_page_num,
-					buf_calc_page_new_checksum(read_buf),
-					buf_calc_page_crc32(read_buf),
-					checksum_field1);
-			}
-#endif /* UNIV_INNOCHECKSUM */
-
-			return(false);
+			return false;
 		}
 
-		/* We need to check whether the stored checksum matches legacy
-		big endian checksum or Innodb checksum. We optimize the order
-		based on earlier results. if earlier we have found pages
-		matching legacy big endian checksum, we try to match it first.
-		Otherwise we check innodb checksum first. */
-		if (legacy_big_endian_checksum) {
-			if (buf_page_is_checksum_valid_crc32(read_buf,
-				checksum_field1, checksum_field2, true)) {
+		return true;
 
-				return(false);
-			}
-			legacy_checksum_checked = true;
-		}
-
-		if (buf_page_is_checksum_valid_innodb(read_buf,
-			checksum_field1, checksum_field2)) {
-			if (curr_algo
-			    == SRV_CHECKSUM_ALGORITHM_STRICT_CRC32) {
-#ifndef UNIV_INNOCHECKSUM
-				page_warn_strict_checksum(
-					curr_algo,
-					SRV_CHECKSUM_ALGORITHM_INNODB,
-					page_id);
-#endif
-			}
-
-			return(false);
-		}
-
-		/* If legacy checksum is not checked, do it now. */
-		if (!legacy_checksum_checked && buf_page_is_checksum_valid_crc32(
-			read_buf, checksum_field1, checksum_field2, true)) {
-
-			legacy_big_endian_checksum = true;
-			return(false);
-		}
-
-#ifdef UNIV_INNOCHECKSUM
-		if (log_file) {
-			fprintf(log_file, "Fail; page::%llu;"
-				" invalid (fails crc32 checksum)\n",
-				cur_page_num);
-		}
-#endif /* UNIV_INNOCHECKSUM */
-		return(true);
-
-	case SRV_CHECKSUM_ALGORITHM_INNODB:
 	case SRV_CHECKSUM_ALGORITHM_STRICT_INNODB:
 
 		if (buf_page_is_checksum_valid_innodb(read_buf,
 			checksum_field1, checksum_field2)) {
-			return(false);
+			return false;
 		}
 
-		if (buf_page_is_checksum_valid_none(read_buf,
-			checksum_field1, checksum_field2)) {
-			if (curr_algo
-			    == SRV_CHECKSUM_ALGORITHM_STRICT_INNODB) {
-#ifndef UNIV_INNOCHECKSUM
-				page_warn_strict_checksum(
-					curr_algo,
-					SRV_CHECKSUM_ALGORITHM_NONE,
-					page_id);
-#endif
-			}
-#ifdef UNIV_INNOCHECKSUM
-			if (log_file) {
-				fprintf(log_file, "page::%llu;"
-					" old style: calculated = %u;"
-					" recorded = %zu;\n", cur_page_num,
-					buf_calc_page_old_checksum(read_buf),
-					checksum_field2);
-				fprintf(log_file, "page::%llu;"
-					" new style: calculated = %u;"
-					" crc32 = %u; recorded = %zu;\n",
-					cur_page_num,
-					buf_calc_page_new_checksum(read_buf),
-					buf_calc_page_crc32(read_buf),
-					checksum_field1);
-			}
-#endif /* UNIV_INNOCHECKSUM */
-
-			return(false);
-		}
-
-		if (buf_page_is_checksum_valid_crc32(read_buf,
-			checksum_field1, checksum_field2, false)
-		    || buf_page_is_checksum_valid_crc32(read_buf,
-			checksum_field1, checksum_field2, true)) {
-
-			if (curr_algo
-			    == SRV_CHECKSUM_ALGORITHM_STRICT_INNODB) {
-#ifndef UNIV_INNOCHECKSUM
-				page_warn_strict_checksum(
-					curr_algo,
-					SRV_CHECKSUM_ALGORITHM_CRC32,
-					page_id);
-#endif
-			}
-
-			return(false);
-		}
-
-#ifdef UNIV_INNOCHECKSUM
-		if (log_file) {
-			fprintf(log_file, "Fail; page::%llu;"
-				" invalid (fails innodb checksum)\n",
-				cur_page_num);
-		}
-#endif /* UNIV_INNOCHECKSUM */
-
-		return(true);
-
+		return true;
 	case SRV_CHECKSUM_ALGORITHM_STRICT_NONE:
 
 		if (buf_page_is_checksum_valid_none(read_buf,
 			checksum_field1, checksum_field2)) {
-			return(false);
+			return false;
 		}
 
-		if (buf_page_is_checksum_valid_crc32(read_buf,
-			checksum_field1, checksum_field2, false)
-		    || buf_page_is_checksum_valid_crc32(read_buf,
-			checksum_field1, checksum_field2, true)) {
-#ifndef UNIV_INNOCHECKSUM
-			page_warn_strict_checksum(
-				curr_algo,
-				SRV_CHECKSUM_ALGORITHM_CRC32,
-				page_id);
-#endif /* !UNIV_INNOCHECKSUM */
-			return(false);
+		return true;
+	case SRV_CHECKSUM_ALGORITHM_CRC32:
+	case SRV_CHECKSUM_ALGORITHM_INNODB:
+
+		if (checksum_field2
+		    != mach_read_from_4(read_buf + FIL_PAGE_LSN)
+		    && checksum_field2 != BUF_NO_CHECKSUM_MAGIC) {
+
+			if (srv_checksum_algorithm
+			    == SRV_CHECKSUM_ALGORITHM_CRC32) {
+				crc32 = buf_calc_page_crc32(read_buf);
+				crc32_inited = true;
+
+				if (checksum_field2 != crc32
+				    && checksum_field2
+				    != buf_calc_page_old_checksum(read_buf)) {
+					return true;
+				}
+			} else {
+
+				ut_ad(srv_checksum_algorithm
+				      == SRV_CHECKSUM_ALGORITHM_INNODB);
+
+				if (checksum_field2
+				    != buf_calc_page_old_checksum(read_buf)) {
+
+					crc32 = buf_calc_page_crc32(read_buf);
+					crc32_inited = true;
+
+					if (checksum_field2 != crc32) {
+						return true;
+					}
+				}
+			}
 		}
 
-		if (buf_page_is_checksum_valid_innodb(read_buf,
-			checksum_field1, checksum_field2)) {
-#ifndef UNIV_INNOCHECKSUM
-			page_warn_strict_checksum(
-				curr_algo,
-				SRV_CHECKSUM_ALGORITHM_INNODB,
-				page_id);
-#endif /* !UNIV_INNOCHECKSUM */
-			return(false);
+		if (checksum_field1 != 0
+		    && checksum_field1 != BUF_NO_CHECKSUM_MAGIC) {
+
+			if (srv_checksum_algorithm
+			    == SRV_CHECKSUM_ALGORITHM_CRC32) {
+
+				if (!crc32_inited) {
+					crc32 = buf_calc_page_crc32(read_buf);
+					crc32_inited = true;
+				}
+
+				if (checksum_field1 != crc32
+				    && checksum_field1
+				    != buf_calc_page_new_checksum(read_buf)) {
+					return true;
+				}
+			} else {
+				ut_ad(srv_checksum_algorithm
+				      == SRV_CHECKSUM_ALGORITHM_INNODB);
+
+				if (checksum_field1
+				    != buf_calc_page_new_checksum(read_buf)) {
+
+					if (!crc32_inited) {
+						crc32 = buf_calc_page_crc32(
+							read_buf);
+						crc32_inited = true;
+					}
+
+					if (checksum_field1 != crc32) {
+						return true;
+					}
+				}
+			}
 		}
 
-#ifdef UNIV_INNOCHECKSUM
-		if (log_file) {
-			fprintf(log_file, "Fail; page::%llu;"
-				" invalid (fails none checksum)\n",
-				cur_page_num);
+		/* If CRC32 is stored in at least one of the fields then the
+		other field must also be CRC32 */
+		if (crc32_inited
+		    && ((checksum_field1 == crc32
+			 && checksum_field2 != crc32)
+			|| (checksum_field1 != crc32
+			    && checksum_field2 == crc32))) {
+			return true;
 		}
-#endif /* UNIV_INNOCHECKSUM */
 
-		return(true);
-
-	case SRV_CHECKSUM_ALGORITHM_NONE:
-		/* should have returned false earlier */
 		break;
-	/* no default so the compiler will emit a warning if new enum
-	is added and not handled here */
+	case SRV_CHECKSUM_ALGORITHM_NONE:
+		ut_error;
 	}
 
-	ut_error;
 	return(false);
 }
 
@@ -1328,10 +1229,6 @@ buf_page_print(const byte* read_buf, const page_size_t& page_size)
 			<< page_zip_calc_checksum(
 				read_buf, page_size.physical(),
 				SRV_CHECKSUM_ALGORITHM_CRC32)
-			<< "/"
-			<< page_zip_calc_checksum(
-				read_buf, page_size.physical(),
-				SRV_CHECKSUM_ALGORITHM_CRC32, true)
 			<< ", "
 			<< buf_checksum_algorithm_name(
 				SRV_CHECKSUM_ALGORITHM_INNODB)
@@ -1358,8 +1255,6 @@ buf_page_print(const byte* read_buf, const page_size_t& page_size)
 	} else {
 		const uint32_t	crc32 = buf_calc_page_crc32(read_buf);
 
-		const uint32_t	crc32_legacy = buf_calc_page_crc32(read_buf,
-								   true);
 		ulint page_type = fil_page_get_type(read_buf);
 
 		ib::info() << "Uncompressed page, stored checksum in field1 "
@@ -1368,7 +1263,7 @@ buf_page_print(const byte* read_buf, const page_size_t& page_size)
 			<< ", calculated checksums for field1: "
 			<< buf_checksum_algorithm_name(
 				SRV_CHECKSUM_ALGORITHM_CRC32) << " "
-			<< crc32 << "/" << crc32_legacy
+			<< crc32
 			<< ", "
 			<< buf_checksum_algorithm_name(
 				SRV_CHECKSUM_ALGORITHM_INNODB) << " "
@@ -1385,7 +1280,7 @@ buf_page_print(const byte* read_buf, const page_size_t& page_size)
 			<< ", calculated checksums for field2: "
 			<< buf_checksum_algorithm_name(
 				SRV_CHECKSUM_ALGORITHM_CRC32) << " "
-			<< crc32 << "/" << crc32_legacy
+			<< crc32
 			<< ", "
 			<< buf_checksum_algorithm_name(
 				SRV_CHECKSUM_ALGORITHM_INNODB) << " "
@@ -4023,10 +3918,6 @@ buf_zip_decompress(
 			<< ", crc32: "
 			<< page_zip_calc_checksum(
 				frame, size, SRV_CHECKSUM_ALGORITHM_CRC32)
-			<< "/"
-			<< page_zip_calc_checksum(
-				frame, size, SRV_CHECKSUM_ALGORITHM_CRC32,
-				true)
 			<< " innodb: "
 			<< page_zip_calc_checksum(
 				frame, size, SRV_CHECKSUM_ALGORITHM_INNODB)

@@ -4919,8 +4919,7 @@ uint32_t
 page_zip_calc_checksum(
 	const void*			data,
 	ulint				size,
-	srv_checksum_algorithm_t	algo,
-	bool				use_legacy_big_endian /* = false */)
+	srv_checksum_algorithm_t	algo)
 {
 	uLong		adler;
 	const Bytef*	s = static_cast<const byte*>(data);
@@ -4934,17 +4933,13 @@ page_zip_calc_checksum(
 		{
 			ut_ad(size > FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
 
-			ut_crc32_func_t	crc32_func = use_legacy_big_endian
-				? ut_crc32_legacy_big_endian
-				: ut_crc32;
-
 			const uint32_t	crc32
-				= crc32_func(
+				= ut_crc32(
 					s + FIL_PAGE_OFFSET,
 					FIL_PAGE_LSN - FIL_PAGE_OFFSET)
-				^ crc32_func(
+				^ ut_crc32(
 					s + FIL_PAGE_TYPE, 2)
-				^ crc32_func(
+				^ ut_crc32(
 					s + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID,
 					size - FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
 
@@ -5101,7 +5096,7 @@ page_zip_verify_checksum(
 		Otherwise we check innodb checksum first. */
 		if (legacy_big_endian_checksum) {
 			const uint32_t calculated =
-				page_zip_calc_checksum(data, size, curr_algo, true);
+				page_zip_calc_checksum(data, size, curr_algo);
 			if (stored == calculated) {
 
 				return(TRUE);
@@ -5127,8 +5122,7 @@ page_zip_verify_checksum(
 			return(TRUE);
 		}
 
-		calculated = page_zip_calc_checksum(
-			data, size, curr_algo, true);
+		calculated = page_zip_calc_checksum(data, size, curr_algo);
 
 		/* If legacy checksum is not checked, do it now. */
 		if ((legacy_checksum_checked
@@ -5162,8 +5156,9 @@ page_zip_verify_checksum(
 
 		if (stored == calculated
 		    || stored == (calculated1 =
-					page_zip_calc_checksum(data, size, SRV_CHECKSUM_ALGORITHM_CRC32, true))
-		) {
+					page_zip_calc_checksum(
+						data, size,
+						SRV_CHECKSUM_ALGORITHM_CRC32))) {
 #ifndef	UNIV_INNOCHECKSUM
 			if (curr_algo
 			    == SRV_CHECKSUM_ALGORITHM_STRICT_INNODB) {
@@ -5183,7 +5178,7 @@ page_zip_verify_checksum(
 		uint32_t calculated = page_zip_calc_checksum(
 			data, size, SRV_CHECKSUM_ALGORITHM_CRC32);
 		const uint32_t calculated1 = page_zip_calc_checksum(
-			data, size, SRV_CHECKSUM_ALGORITHM_CRC32, true);
+			data, size, SRV_CHECKSUM_ALGORITHM_CRC32);
 
 		if (stored == calculated
 		    || stored == calculated1) {

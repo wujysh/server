@@ -52,8 +52,7 @@ byteorder when converting byte strings to integers
 @return checksum */
 uint32_t
 buf_calc_page_crc32(
-	const byte*	page,
-	bool		use_legacy_big_endian /* = false */)
+	const byte*	page)
 {
 	/* Since the field FIL_PAGE_FILE_FLUSH_LSN, and in versions <= 4.1.x
 	FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID, are written outside the buffer pool
@@ -63,15 +62,11 @@ buf_calc_page_crc32(
 	checksum is stored, and also the last 8 bytes of page because
 	there we store the old formula checksum. */
 
-	ut_crc32_func_t	crc32_func = use_legacy_big_endian
-		? ut_crc32_legacy_big_endian
-		: ut_crc32;
-
-	const uint32_t	c1 = crc32_func(
+	const uint32_t	c1 = ut_crc32(
 		page + FIL_PAGE_OFFSET,
 		FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION - FIL_PAGE_OFFSET);
 
-	const uint32_t	c2 = crc32_func(
+	const uint32_t	c2 = ut_crc32(
 		page + FIL_PAGE_DATA,
 		UNIV_PAGE_SIZE - FIL_PAGE_DATA - FIL_PAGE_END_LSN_OLD_CHKSUM);
 
