@@ -2592,9 +2592,32 @@ fil_space_verify_crypt_checksum(
 	/* If stored checksum matches one of the calculated checksums
 	page is not corrupted. */
 
-	bool encrypted = (checksum == cchecksum1 || checksum == cchecksum2
-		|| checksum == BUF_NO_CHECKSUM_MAGIC);
+	bool post_encryption_checksum =
+		(checksum == cchecksum1 || checksum == cchecksum2
+		 || checksum == BUF_NO_CHECKSUM_MAGIC);
 
+	if (!post_encryption_checksum) {
+		return false;
+	}
+
+	bool 		encrypted = false;
+
+#ifndef UNIV_INNOCHECKSUM
+	ulint	space_id = mach_read_from_4(page + FIL_PAGE_SPACE_ID);
+	fil_space_t*	space1;
+
+	mutex_enter(&fil_system->mutex);
+	space1 = fil_space_get_by_id(space_id);
+	mutex_exit(&fil_system->mutex);
+
+	if (space1 != NULL
+	    && space1->crypt_data != NULL
+	    && space1->crypt_data->type == CRYPT_SCHEME_1) {
+		return true;
+	}
+
+#endif
+	/* Following code could execute for import statement. */
 	/* MySQL 5.6 and MariaDB 10.0 and 10.1 will write an LSN to the
 	first page of each system tablespace file at
 	FIL_PAGE_FILE_FLUSH_LSN offset. On other pages and in other files,
@@ -2638,7 +2661,7 @@ fil_space_verify_crypt_checksum(
 				page, checksum1, checksum2);
 	}
 
-	if (encrypted && valid) {
+	if (valid) {
 		/* If page is encrypted and traditional checksums match,
 		page could be still encrypted, or not encrypted and valid or
 		corrupted. */
