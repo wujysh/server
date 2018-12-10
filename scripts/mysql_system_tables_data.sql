@@ -47,7 +47,6 @@ INSERT INTO global_priv SELECT * FROM tmp_user_socket WHERE @had_user_table=0 AN
 DROP TABLE tmp_user_nopasswd, tmp_user_socket;
 
 CREATE TEMPORARY TABLE tmp_proxies_priv LIKE proxies_priv;
-INSERT INTO tmp_proxies_priv VALUES ('localhost', 'root', '', '', TRUE, '', now());
-REPLACE INTO tmp_proxies_priv SELECT @current_hostname, 'root', '', '', TRUE, '', now() FROM DUAL WHERE @current_hostname != 'localhost';
+INSERT INTO tmp_proxies_priv SELECT @current_hostname, 'root', '', '', TRUE, '', now() FROM DUAL WHERE @current_hostname != 'localhost';
 INSERT INTO  proxies_priv SELECT * FROM tmp_proxies_priv WHERE @had_proxies_priv_table=0;
 DROP TABLE tmp_proxies_priv;

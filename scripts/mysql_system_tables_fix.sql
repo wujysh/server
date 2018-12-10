@@ -28,6 +28,8 @@ set sql_mode='';
 set storage_engine=Aria;
 set enforce_storage_engine=NULL;
 
+set @have_innodb= (select count(engine) from information_schema.engines where engine='INNODB' and support != 'NO');
+
 ALTER TABLE user add File_priv enum('N','Y') COLLATE utf8_general_ci DEFAULT 'N' NOT NULL;
 
 # Detect whether or not we had the Grant_priv column
@@ -649,14 +651,6 @@ ALTER TABLE user ADD max_statement_time decimal(12,6) DEFAULT 0 NOT NULL;
 ALTER TABLE user MODIFY password_expired ENUM('N', 'Y') COLLATE utf8_general_ci DEFAULT 'N' NOT NULL;
 ALTER TABLE user MODIFY is_role enum('N', 'Y') COLLATE utf8_general_ci DEFAULT 'N' NOT NULL;
 
--- Need to pre-fill mysql.proxies_priv with access for root even when upgrading from
--- older versions
-
-CREATE TEMPORARY TABLE tmp_proxies_priv LIKE proxies_priv;
-INSERT INTO tmp_proxies_priv VALUES ('localhost', 'root', '', '', TRUE, '', now());
-INSERT INTO proxies_priv SELECT * FROM tmp_proxies_priv WHERE @had_proxies_priv_table=0;
-DROP TABLE tmp_proxies_priv;
-
 -- Checking for any duplicate hostname and username combination are exists.
 -- If exits we will throw error.
 DELIMITER //
@@ -767,7 +761,8 @@ ALTER TABLE index_stats ENGINE=Aria transactional=0;
 
 DELIMITER //
 IF 'BASE TABLE' = (select table_type from information_schema.tables where table_name='user') THEN
-  REPLACE global_priv SELECT host, user, JSON_COMPACT(JSON_OBJECT('access',
+  CREATE TABLE IF NOT EXISTS global_priv (Host char(60) binary DEFAULT '', User char(80) binary DEFAULT '', Priv JSON NOT NULL DEFAULT '{}' CHECK(JSON_VALID(Priv)), PRIMARY KEY Host (Host,User)) engine=Aria transactional=1 CHARACTER SET utf8 COLLATE utf8_bin comment='Users and global privileges'
+  SELECT Host, User, JSON_COMPACT(JSON_OBJECT('access',
                              1*('Y'=Select_priv)+
                              2*('Y'=Insert_priv)+
                              4*('Y'=Update_priv)+
@@ -807,10 +802,10 @@ IF 'BASE TABLE' = (select table_type from information_schema.tables where table_
                     'max_connections', max_connections,
                     'max_user_connections', max_user_connections,
                     'max_statement_time', max_statement_time,
-                    'plugin', if(plugin,plugin,if(length(password)=16,'mysql_old_password','mysql_native_password')),
-                    'authentication_string', if(plugin,authentication_string,password),
+                    'plugin', if(plugin>'',plugin,if(length(password)=16,'mysql_old_password','mysql_native_password')),
+                    'authentication_string', if(plugin>'',authentication_string,password),
                     'default_role', default_role,
-                    'is_role', 'Y'=is_role))
+                    'is_role', 'Y'=is_role)) as Priv
   FROM user;
   DROP TABLE user;
 END IF//
