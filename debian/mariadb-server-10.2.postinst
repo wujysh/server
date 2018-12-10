@@ -245,6 +245,7 @@ EOF
       systemctl daemon-reload
     fi
     invoke restart
+    exit 0
   ;;
 
   *)
@@ -253,7 +254,7 @@ EOF
   ;;
 esac
 
-db_stop # in case invoke failes
+db_stop # in case invoke fails
 
 # dh_systemd_start doesn't emit anything since we still ship /etc/init.d/mysql.
 # Thus MariaDB server is started via init.d script, which in turn redirects to
