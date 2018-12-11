@@ -868,10 +868,9 @@ buf_page_is_corrupted(
 
 	ulint		checksum_field1;
 	ulint		checksum_field2;
-	ulint 		space_id = mach_read_from_4(
-		read_buf + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID);
-	ulint page_type = mach_read_from_2(
-		read_buf + FIL_PAGE_TYPE);
+	bool		crc32_inited = false;
+	ib_uint32_t	crc32 = ULINT32_UNDEFINED;
+	ulint page_type = mach_read_from_2(read_buf + FIL_PAGE_TYPE);
 
 	/* We can trust page type if page compression is set on tablespace
 	flags because page compression flag means file must have been
@@ -974,120 +973,137 @@ buf_page_is_corrupted(
 		return(false);
 	}
 
-	ulint	page_no = mach_read_from_4(read_buf + FIL_PAGE_OFFSET);
-
 	const srv_checksum_algorithm_t	curr_algo =
 		static_cast<srv_checksum_algorithm_t>(srv_checksum_algorithm);
 
 	switch (curr_algo) {
-	case SRV_CHECKSUM_ALGORITHM_CRC32:
 	case SRV_CHECKSUM_ALGORITHM_STRICT_CRC32:
 
 		if (buf_page_is_checksum_valid_crc32(read_buf,
 			checksum_field1, checksum_field2)) {
-			return(false);
+			return false;
 		}
 
-		if (buf_page_is_checksum_valid_none(read_buf,
-			checksum_field1, checksum_field2)) {
-			if (curr_algo
-			    == SRV_CHECKSUM_ALGORITHM_STRICT_CRC32) {
-				page_warn_strict_checksum(
-					curr_algo,
-					SRV_CHECKSUM_ALGORITHM_NONE,
-					space_id, page_no);
-			}
-
-			return(false);
-		}
-
-		if (buf_page_is_checksum_valid_innodb(read_buf,
-			checksum_field1, checksum_field2)) {
-			if (curr_algo
-			    == SRV_CHECKSUM_ALGORITHM_STRICT_CRC32) {
-				page_warn_strict_checksum(
-					curr_algo,
-					SRV_CHECKSUM_ALGORITHM_INNODB,
-					space_id, page_no);
-			}
-
-			return(false);
-		}
-
-		return(true);
-
-	case SRV_CHECKSUM_ALGORITHM_INNODB:
+		return true;
 	case SRV_CHECKSUM_ALGORITHM_STRICT_INNODB:
 
 		if (buf_page_is_checksum_valid_innodb(read_buf,
 			checksum_field1, checksum_field2)) {
-			return(false);
+			return false;
 		}
 
-		if (buf_page_is_checksum_valid_none(read_buf,
-			checksum_field1, checksum_field2)) {
-			if (curr_algo
-			    == SRV_CHECKSUM_ALGORITHM_STRICT_INNODB) {
-				page_warn_strict_checksum(
-					curr_algo,
-					SRV_CHECKSUM_ALGORITHM_NONE,
-					space_id, page_no);
-			}
-
-			return(false);
-		}
-
-		if (buf_page_is_checksum_valid_crc32(read_buf,
-			checksum_field1, checksum_field2)) {
-			if (curr_algo
-			    == SRV_CHECKSUM_ALGORITHM_STRICT_INNODB) {
-				page_warn_strict_checksum(
-					curr_algo,
-					SRV_CHECKSUM_ALGORITHM_CRC32,
-					space_id, page_no);
-			}
-
-			return(false);
-		}
-
-		return(true);
-
+		return true;
 	case SRV_CHECKSUM_ALGORITHM_STRICT_NONE:
 
 		if (buf_page_is_checksum_valid_none(read_buf,
 			checksum_field1, checksum_field2)) {
-			return(false);
+			return false;
 		}
 
-		if (buf_page_is_checksum_valid_crc32(read_buf,
-			checksum_field1, checksum_field2)) {
-			page_warn_strict_checksum(
-				curr_algo,
-				SRV_CHECKSUM_ALGORITHM_CRC32,
-				space_id, page_no);
-			return(false);
+		return true;
+	case SRV_CHECKSUM_ALGORITHM_CRC32:
+	case SRV_CHECKSUM_ALGORITHM_INNODB:
+		/* Verify old versions of InnoDB only stored 8 byte lsn to the
+		start and the end of the page. */
+
+		/* since innodb_checksum_algorithm is not strict_* allow
+		any of the algos to match for the old field. */
+
+		if (checksum_field2
+		    != mach_read_from_4(read_buf + FIL_PAGE_LSN)
+		    && checksum_field2 != BUF_NO_CHECKSUM_MAGIC) {
+
+			if (srv_checksum_algorithm
+			    == SRV_CHECKSUM_ALGORITHM_CRC32) {
+
+				crc32 = buf_calc_page_crc32(read_buf);
+				crc32_inited = true;
+
+				if (checksum_field2 != crc32
+				    && checksum_field2
+				    != buf_calc_page_old_checksum(read_buf)) {
+
+					return true;
+				}
+			} else {
+				ut_ad(srv_checksum_algorithm
+						== SRV_CHECKSUM_ALGORITHM_INNODB);
+
+				if (checksum_field2
+				    != buf_calc_page_old_checksum(read_buf)) {
+
+					crc32 = buf_calc_page_crc32(read_buf);
+					crc32_inited = true;
+
+					if (checksum_field2 != crc32) {
+						return true;
+					}
+				}
+			}
 		}
 
-		if (buf_page_is_checksum_valid_innodb(read_buf,
-			checksum_field1, checksum_field2)) {
-			page_warn_strict_checksum(
-				curr_algo,
-				SRV_CHECKSUM_ALGORITHM_INNODB,
-				space_id, page_no);
-			return(false);
+		/* Old field is fine, check the new field */
+
+		if (checksum_field1 != 0
+		    && checksum_field1 != BUF_NO_CHECKSUM_MAGIC) {
+
+			/* The checksum does not match any of the
+			   fast to check. First check the selected algorithm
+			   for writing checksums because we assume that the
+			   chance of it matching is higher. */
+
+			if (srv_checksum_algorithm
+			    == SRV_CHECKSUM_ALGORITHM_CRC32) {
+
+				if (!crc32_inited) {
+					crc32 = buf_calc_page_crc32(read_buf);
+					crc32_inited = true;
+				}
+
+				if (checksum_field1 != crc32
+				    && checksum_field1
+				    != buf_calc_page_new_checksum(read_buf)) {
+
+					return true;
+				}
+			} else {
+				ut_ad(srv_checksum_algorithm
+				      == SRV_CHECKSUM_ALGORITHM_INNODB);
+
+				if (checksum_field1
+				    != buf_calc_page_new_checksum(read_buf)) {
+
+					if (!crc32_inited) {
+						crc32 = buf_calc_page_crc32(
+								read_buf);
+						crc32_inited = true;
+					}
+
+					if (checksum_field1 != crc32) {
+						return true;
+					}
+				}
+			}
 		}
 
-		return(true);
+		if (crc32_inited
+		    && ((checksum_field1 == crc32
+			 && checksum_field2 != crc32)
+			|| (checksum_field1 != crc32
+			    && checksum_field2 == crc32))) {
+			return true;
+		}
+
+		break;
 
 	case SRV_CHECKSUM_ALGORITHM_NONE:
 		/* should have returned FALSE earlier */
-		break;
+		ut_error;
 	/* no default so the compiler will emit a warning if new enum
 	is added and not handled here */
 	}
 
-	ut_error;
-	return(false);
+	return false;
 }
 
 /** Dump a page to stderr.
